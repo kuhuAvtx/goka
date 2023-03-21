@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"os/signal"
@@ -13,9 +14,10 @@ import (
 )
 
 var (
-	brokers             = []string{"localhost:9092"}
-	topic   goka.Stream = "example-stream"
-	group   goka.Group  = "example-group"
+	brokers                 = []string{"172.31.13.207:9092"}
+	readerTopic goka.Stream = "mar21_test"
+	writerTopic goka.Stream = "mar21_test_out"
+	group       goka.Group  = "mar21_test_grp"
 
 	tmc *goka.TopicManagerConfig
 )
@@ -30,7 +32,7 @@ func init() {
 
 // emits a single message and leave
 func runEmitter() {
-	emitter, err := goka.NewEmitter(brokers, topic, new(codec.String))
+	emitter, err := goka.NewEmitter(brokers, readerTopic, new(codec.String))
 	if err != nil {
 		log.Fatalf("error creating emitter: %v", err)
 	}
@@ -41,6 +43,23 @@ func runEmitter() {
 	}
 	log.Println("message emitted")
 }
+
+// emits a single message and leave
+func runFinalWriter(key string, msg interface{}) {
+	emitter, err := goka.NewEmitter(brokers, writerTopic, new(codec.String))
+	if err != nil {
+		log.Fatalf("runFinalWriter: error creating emitter: %v", err)
+	}
+	defer emitter.Finish()
+	err = emitter.EmitSync(key, msg)
+	if err != nil {
+		log.Fatalf("error emitting message: %v", err)
+	}
+	log.Println("message emitted")
+}
+
+// ____Example of message incoming from goflow2_____
+// 2023/03/21 13:11:36 key = [127 0 0 1]-, counter = 198404, msg = {"Type":"NETFLOW_V9","ObservationPointID":0,"ObservationDomainID":0,"TimeReceived":1679404260,"SequenceNum":161338694,"SamplingRate":0,"SamplerAddress":"127.0.0.1","TimeFlowStart":1679404257,"TimeFlowEnd":1679404257,"TimeFlowStartMs":1679404256008,"TimeFlowEndMs":1679404256008,"Bytes":0,"Packets":0,"SrcAddr":"192.152.220.119","DstAddr":"204.24.202.178","Etype":2048,"Proto":6,"SrcPort":58443,"DstPort":80,"InIf":0,"OutIf":0,"SrcMac":"00:00:00:00:00:00","DstMac":"00:00:00:00:00:00","SrcVlan":0,"DstVlan":0,"VlanId":0,"IngressVrfID":0,"EgressVrfID":0,"IPTos":0,"ForwardingStatus":0,"IPTTL":0,"TCPFlags":0,"IcmpType":0,"IcmpCode":0,"IPv6FlowLabel":0,"FragmentId":0,"FragmentOffset":0,"BiFlowDirection":0,"SrcAS":0,"DstAS":0,"NextHop":"","NextHopAS":0,"SrcNet":0,"DstNet":0,"EtypeName":"IPv4","ProtoName":"TCP","IcmpName":""}
 
 // process messages until ctrl-c is pressed
 func runProcessor() {
@@ -57,13 +76,19 @@ func runProcessor() {
 		// SetValue stores the incremented counter in the group table for in
 		// the message's key.
 		ctx.SetValue(counter)
-		log.Printf("key = %s, counter = %v, msg = %v", ctx.Key(), counter, msg)
+		result := make(map[string]interface{})
+		json.Unmarshal([]byte(msg.(string)), &result)
+		dstPort := result["DstPort"]
+		if dstPort != nil && dstPort.(float64) < 1024 {
+			log.Printf("key = %s, counter = %v, msg = %v", ctx.Key(), counter, msg)
+			runFinalWriter(ctx.Key(), msg)
+		}
 	}
 
 	// Define a new processor group. The group defines all inputs, outputs, and
 	// serialization formats. The group-table topic is "example-group-table".
 	g := goka.DefineGroup(group,
-		goka.Input(topic, new(codec.String), cb),
+		goka.Input(readerTopic, new(codec.String), cb),
 		goka.Persist(new(codec.Int64)),
 	)
 
@@ -113,9 +138,9 @@ func main() {
 		log.Fatalf("Error creating topic manager: %v", err)
 	}
 	defer tm.Close()
-	err = tm.EnsureStreamExists(string(topic), 8)
+	err = tm.EnsureStreamExists(string(readerTopic), 8)
 	if err != nil {
-		log.Printf("Error creating kafka topic %s: %v", topic, err)
+		log.Printf("Error creating kafka topic %s: %v", readerTopic, err)
 	}
 
 	runEmitter()   // emits one message and stops
