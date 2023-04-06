@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,9 +16,9 @@ import (
 
 var (
 	brokers                 = []string{"172.31.13.207:9092"}
-	readerTopic goka.Stream = "mar21_test"
-	writerTopic goka.Stream = "mar21_test_out"
-	group       goka.Group  = "mar21_test_grp"
+	readerTopic goka.Stream = "apr3_test"
+	writerTopic goka.Stream = "apr3_test_out"
+	group       goka.Group  = "apr3_test_grp"
 
 	tmc *goka.TopicManagerConfig
 )
@@ -79,9 +80,11 @@ func runProcessor() {
 		result := make(map[string]interface{})
 		json.Unmarshal([]byte(msg.(string)), &result)
 		dstPort := result["DstPort"]
+		result["Bytes"] = rand.Intn(1000000)
 		if dstPort != nil && dstPort.(float64) < 1024 {
-			log.Printf("key = %s, counter = %v, msg = %v", ctx.Key(), counter, msg)
-			runFinalWriter(ctx.Key(), msg)
+			log.Printf("key = %s, counter = %v, msg = %v", ctx.Key(), counter, result)
+			resJs, _ := json.Marshal(result)
+			runFinalWriter(ctx.Key(), string(resJs))
 		}
 	}
 
